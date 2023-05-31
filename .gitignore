@@ -1,0 +1,6 @@
+__pycache__/*
+result/*
+test_input.npy
+test_output.npy
+cover.png
+model.pt

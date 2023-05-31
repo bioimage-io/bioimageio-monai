@@ -10,7 +10,8 @@ GOOD = '\033[92mGOOD\033[0m'
 WARNING = '\033[93mWARNING\033[0m'
 ERROR = '\033[91mERROR\033[0m'
 
-from transformations import monai_to_bmz_preprocessing, monai_to_bmz_postprocessing, convert_to_tensor
+# from transformations import monai_to_bmz_preprocessing, monai_to_bmz_postprocessing, convert_to_tensor
+from simple_transformations import monai_to_bmz_preprocessing, monai_to_bmz_postprocessing, convert_to_tensor
 from loaders import load_weights_path, load_metadata_parser, load_inference_parser
 from utils import obtain_metadata, select_input_axes, select_output_axes
 
@@ -63,20 +64,23 @@ def convert_model(model_path, input_img, bioimage_save_path):
     given_image = input_img[None,...] # As only one image is given, we create a batch size of 1
     preprocessed_img = given_image[0] # and to process we take the image (we want the batch size for the model building)
     
-    print('Read image shape: {}'.format(preprocessed_img.shape))
+    print('Read image: {} - {}'.format(preprocessed_img.shape, preprocessed_img.dtype))
 
     if 'preprocessing' in inference_keys:
         # Load the preprocessing functions
-        bmz_preprocessing = monai_to_bmz_preprocessing(inference_parser, name)
+        monai_preprocessing_list, bmz_preprocessing_list = monai_to_bmz_preprocessing(inference_parser, name)
         
-        for preproc_funct in bmz_preprocessing:
+        for preproc_funct in monai_preprocessing_list:
             preprocessed_img = preproc_funct(preprocessed_img)
             print('\t{}'.format(preproc_funct))
             print('\tPreprocessed image: {} - {}'.format(preprocessed_img.shape, preprocessed_img.dtype))
+
+        preprocessing = bmz_preprocessing_list if len(bmz_preprocessing_list) > 0 else None
     else:
         preprocessed_img = convert_to_tensor(preprocessed_img, **{'dtype': torch.float32})
+        preprocessing = None
 
-    print('Input image shape: {} - {}'.format(preprocessed_img.shape, preprocessed_img.dtype))
+    print('Input image: {} - {}'.format(preprocessed_img.shape, preprocessed_img.dtype))
 
     #####
     # Apply the prediction of the model
@@ -97,29 +101,31 @@ def convert_model(model_path, input_img, bioimage_save_path):
     #####
     
     if 'postprocessing' in inference_keys:
-        monai_postprocessing = inference_parser['postprocessing']['transforms']
-        bmz_postprocessing = monai_to_bmz_postprocessing(monai_postprocessing, name)
+        monai_postprocessing_list, bmz_postprocessing_list = monai_to_bmz_postprocessing(inference_parser, name)
         
         # Postprocess the prediction    
         postprocessed_img = prediction
-        for postcproc_funct in bmz_postprocessing:
+        for postcproc_funct in monai_postprocessing_list:
             postprocessed_img = postcproc_funct(postprocessed_img)
             print('\t{}'.format(preproc_funct))
-            print('Preprocessed image: {} - {}'.format(postprocessed_img.shape, postprocessed_img.dtype))
+            print('Postprocessed image: {} - {}'.format(postprocessed_img.shape, postprocessed_img.dtype))
+            postprocessing = bmz_postprocessing_list if len(bmz_postprocessing_list) > 0 else None
     else:
         postprocessed_img = prediction
+        postprocessing = None
 
-    print('Postprocessed image shape: {}'.format(postprocessed_img.shape))
+    print('Postprocessed image: {} - {}'.format(postprocessed_img.shape, postprocessed_img.dtype))
     single_input = given_image
     single_prediction = postprocessed_img
-    print('Single input shape: {}'.format(single_input.shape))
-    print('Single prediction shape: {}'.format(single_prediction.shape))
+    print('Single input: {} - {}'.format(single_input.shape, single_input.dtype))
+    print('Single prediction: {} - {}'.format(single_prediction.shape, single_prediction.dtype))
+    print('{} - Input image has been preprocessed, passed trough the model and postprocessed.'.format(GOOD))  
 
     ###
     # Now, metadata from the model will be created
-    ###
-    
+    ##
     Trained_model_name, Trained_model_description, authors, citations = obtain_metadata(inference_parser, metadata_parser, metadata_keys)
+    print('{} - Metadata loadded.'.format(GOOD))  
 
     ###
     # Create the output folder and a markdown README file
@@ -157,7 +163,7 @@ def convert_model(model_path, input_img, bioimage_save_path):
     ###
     # export the model with Pytorch weihgts
     ###
-
+    print(f'Preprocessing: {preprocessing}')
     try:
         build_model(
             weight_uri=weight_path,
@@ -178,8 +184,8 @@ def convert_model(model_path, input_img, bioimage_save_path):
             weight_type='torchscript',
             pytorch_version=torch.__version__,
             add_deepimagej_config=False, # Because if not sigmoid cannot be used
-            preprocessing=None,
-            postprocessing=None
+            preprocessing=preprocessing,
+            postprocessing=postprocessing
         )
         print('{} - Model has been built'.format(GOOD))  
 
